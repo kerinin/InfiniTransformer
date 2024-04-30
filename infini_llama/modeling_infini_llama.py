@@ -946,7 +946,8 @@ class LlamaInfiniAttention(LlamaAttention):
 
         # Each head has its own gate
         # init with -100 to make it close to 0 effect at the beginning
-        self.gate = nn.Parameter(torch.full((1, self.num_heads, 1, 1), 0.0))
+        #self.gate = nn.Parameter(torch.full((1, self.num_heads, 1, 1), 0.0))
+        self.gate = nn.Parameter(torch.full((1, self.num_heads, 1, 1), -100.0))
         # self.segment_size = config.segment_size
 
     def forward(
