@@ -785,78 +785,6 @@ def main():
 
         print("Finished epoch:", epoch)
 
-        model.eval()
-        losses = []
-        for step, batch in enumerate(eval_dataloader):
-            input_ids = torch.tensor_split(
-                batch["input_ids"],
-                list(
-                    range(segment_length, batch["input_ids"].shape[1], segment_length)
-                ),
-                dim=1,
-            )
-            if "attention_mask" in batch:
-                attention_mask = torch.tensor_split(
-                    batch["attention_mask"],
-                    list(
-                        range(
-                            segment_length,
-                            batch["attention_mask"].shape[1],
-                            segment_length,
-                        )
-                    ),
-                    dim=1,
-                )
-            if "labels" in batch:
-                labels = torch.tensor_split(
-                    batch["labels"],
-                    list(
-                        range(segment_length, batch["labels"].shape[1], segment_length)
-                    ),
-                    dim=1,
-                )
-
-            memory, norm_term = None, None
-            for i in range(len(input_ids)):
-                with torch.no_grad():
-                    outputs = model(
-                        input_ids=input_ids[i],
-                        attention_mask=attention_mask[i],
-                        labels=labels[i],
-                        memory=memory,
-                        norm_term=norm_term,
-                    )
-                memory = outputs.memory
-                norm_term = outputs.norm_term
-
-            loss = outputs.loss
-            losses.append(
-                accelerator.gather_for_metrics(
-                    loss.repeat(args.per_device_eval_batch_size)
-                )
-            )
-
-        losses = torch.cat(losses)
-        try:
-            eval_loss = torch.mean(losses)
-            perplexity = math.exp(eval_loss)
-        except OverflowError:
-            perplexity = float("inf")
-
-        logger.info(f"epoch {epoch}: perplexity: {perplexity} eval_loss: {eval_loss}")
-
-        if args.with_tracking:
-            accelerator.log(
-                {
-                    "perplexity": perplexity,
-                    "eval_loss": eval_loss,
-                    "train_loss": total_loss.item() / len(train_dataloader),
-                    "epoch": epoch,
-                    "step": completed_steps,
-                },
-                step=completed_steps,
-            )
-
         if args.push_to_hub and epoch < args.num_train_epochs - 1:
             accelerator.wait_for_everyone()
             unwrapped_model = accelerator.unwrap_model(model)
@@ -902,9 +830,6 @@ def main():
                     repo_type="model",
                     token=args.hub_token,
                 )
-            with open(os.path.join(args.output_dir, "all_results.json"), "w") as f:
-                json.dump({"perplexity": perplexity}, f)
-
 
 if __name__ == "__main__":
     main()

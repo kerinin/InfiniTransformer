@@ -358,6 +358,7 @@ def main():
                 repo_name, exist_ok=True, token=args.hub_token
             ).repo_id
 
+            os.makedirs(args.output_dir, exist_ok=True)
             with open(os.path.join(args.output_dir, ".gitignore"), "w+") as gitignore:
                 if "step_*" not in gitignore:
                     gitignore.write("step_*\n")
@@ -484,28 +485,33 @@ def main():
             )
             block_size = min(1024, config.max_position_embeddings)
     else:
-        if args.block_size > tokenizer.model_max_length:
-            logger.warning(
-                f"The block_size passed ({args.block_size}) is larger than the maximum length for the model "
-                f"({tokenizer.model_max_length}). Using block_size={tokenizer.model_max_length}."
-            )
-        block_size = min(args.block_size, tokenizer.model_max_length)
+        # NOTE: Seems like this should be applied to segment_length, not block size?
+        # if args.block_size > tokenizer.model_max_length:
+        #     logger.warning(
+        #         f"The block_size passed ({args.block_size}) is larger than the maximum length for the model "
+        #         f"({tokenizer.model_max_length}). Using block_size={tokenizer.model_max_length}."
+        #     )
+        # block_size = min(args.block_size, tokenizer.model_max_length)
+        block_size = args.block_size
 
-    # Main data processing function that will concatenate all texts from our dataset and generate chunks of block_size.
+    # Main data processing function 
+    # Rather than concatenating (potentially unrelated) examples, this splits 
+    # examples larger than the block_size. 
     def group_texts(examples):
-        # Concatenate all texts.
-        concatenated_examples = {k: list(chain(*examples[k])) for k in examples.keys()}
-        total_length = len(concatenated_examples[list(examples.keys())[0]])
-        # We drop the small remainder, and if the total_length < block_size  we exclude this batch and return an empty dict.
-        # We could add padding if the model supported it instead of this drop, you can customize this part to your needs.
-        total_length = (total_length // block_size) * block_size
-        # Split by chunks of max_len.
-        result = {
-            k: [t[i : i + block_size] for i in range(0, total_length, block_size)]
-            for k, t in concatenated_examples.items()
+        input_ids = []
+        attention_mask = []
+
+        # Split examples longer than block size
+        for x in examples["input_ids"]:
+            input_ids += [x[i: i + block_size] for i in range(0, len(x), block_size)]
+        for x in examples["attention_mask"]:
+            attention_mask += [x[i: i + block_size] for i in range(0, len(x), block_size)]
+
+        return {
+            "input_ids": input_ids,
+            "attention_mask": attention_mask,
+            "labels": input_ids.copy(),
         }
-        result["labels"] = result["input_ids"].copy()
-        return result
 
     # Note that with `batched=True`, this map processes 1,000 texts together, so group_texts throws away a remainder
     # for each of those groups of 1,000 texts. You can adjust that batch_size here but a higher value might be slower
@@ -515,7 +521,11 @@ def main():
     # https://huggingface.co/docs/datasets/process#map
 
     with accelerator.main_process_first():
-        lm_datasets = tokenized_datasets.map(
+        # Remove training examples that are too short to make use of the
+        # infini-attention mechanism
+        lm_datasets = tokenized_datasets.filter(
+            lambda example: len(example["input_ids"]) >= (2 * segment_length)
+        ).map(
             group_texts,
             batched=True,
             num_proc=args.preprocessing_num_workers,
