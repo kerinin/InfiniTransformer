@@ -1,7 +1,7 @@
 # DEBUG=true 
 # accelerate launch --num_processes=1 --mixed_precision='bf16' \
 # accelerate launch --config_file='/infini/fsdb_config.yaml' \
-accelerate launch --num_processes=1 \
+accelerate launch --num_processes=1 --mixed_precision='bf16' \
     train.llama.infini.noclm.py \
     --segment_length=128 \
     --block_size=512 \
